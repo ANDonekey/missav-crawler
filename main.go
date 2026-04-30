@@ -1670,10 +1670,10 @@ func crawlInterval() time.Duration {
 func main() {
 	godotenv.Load()
 
+	startProfilingServer()
+
 	db := ConnectDB()
 	defer db.Close()
-
-	startProfilingServer()
 
 	go func() {
 		for range time.NewTicker(30 * time.Second).C {
