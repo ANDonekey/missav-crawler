@@ -53,6 +53,13 @@ type CrawlStatus struct {
 
 func startProfilingServer() {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, "/status", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		statusMu.Lock()
 		s := crawlStat
@@ -76,7 +83,11 @@ Memory: %.1f MB
 	})
 
 	go func() {
-		addr := ":6060"
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "6060"
+		}
+		addr := ":" + port
 		log.Printf("profiling server started on %s", addr)
 		if err := http.ListenAndServe(addr, mux); err != nil {
 			log.Printf("profiling server error: %v", err)
@@ -1644,6 +1655,18 @@ func updateCrawlStatus(currentURL string) {
 	crawlStat.CurrentJob = currentURL
 }
 
+func crawlInterval() time.Duration {
+	val := strings.TrimSpace(os.Getenv("CRAWL_INTERVAL"))
+	if val == "" {
+		return 6 * time.Hour
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return 6 * time.Hour
+	}
+	return d
+}
+
 func main() {
 	godotenv.Load()
 
@@ -1670,7 +1693,11 @@ func main() {
 		}
 	}()
 
-	log.Printf("start missav crawler jobs: %s", startURL)
-	RunCrawlerJobs(db)
-	log.Println("finish")
+	interval := crawlInterval()
+	log.Printf("start missav crawler, interval: %v", interval)
+	for {
+		RunCrawlerJobs(db)
+		log.Printf("crawl pass done, next in %v", interval)
+		time.Sleep(interval)
+	}
 }
