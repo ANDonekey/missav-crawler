@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl -l -v)",
+      "Bash(wsl bash *)",
+      "Bash(pwsh -Command \"Get-Command psql -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(systemctl status *)",
+      "Bash(service postgresql *)",
+      "Bash(pg_lsclusters)",
+      "Bash(sudo -u postgres psql -l)",
+      "Bash(sudo *)",
+      "Bash(PGPASSWORD=postgres psql *)",
+      "Bash(sqlite3 /home/henry/code/missav/data.db \".tables\")",
+      "Bash(sqlite3 /home/henry/code/missav/data.db \"SELECT 'videos:', count\\(*\\) FROM videos;\" \"SELECT 'streams:', count\\(*\\) FROM streams;\" \"SELECT 'crawl_jobs:', count\\(*\\) FROM crawl_jobs;\")",
+      "Bash(sqlite3 *)",
+      "Bash(GONOSUMCHECK='*' GONOSUMDB='*' GOFLAGS=-mod=mod GOPROXY=direct /usr/local/go/bin/go build -o /dev/null .)",
+      "Bash(grep *)",
+      "Bash(awk -F: '$1 >= 1037 && $1 <= 1100')",
+      "Bash(sed -i '453,462c\\\\' /dev/null /home/henry/code/missav/main.go)",
+      "Bash(sed -i '453r /tmp/replacement.txt' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '453,462d' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '452r /tmp/replacement.txt' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '452aINSERT_HERE' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '453,494d' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '1450a\\\\\\\\t\\\\t\\\\t\\\\tstatusMu.Lock\\(\\)\\\\n\\\\t\\\\t\\\\t\\\\tcrawlStat.Errors++\\\\n\\\\t\\\\t\\\\t\\\\tstatusMu.Unlock\\(\\)' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '1519a\\\\\\\\t\\\\t\\\\t\\\\tstatusMu.Lock\\(\\)\\\\n\\\\t\\\\t\\\\t\\\\tcrawlStat.Errors++\\\\n\\\\t\\\\t\\\\t\\\\tstatusMu.Unlock\\(\\)' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '1637,1644d' /home/henry/code/missav/main.go)",
+      "Bash(sed -i '1636r /tmp/status_ticker.txt' /home/henry/code/missav/main.go)"
+    ]
+  }
+}
