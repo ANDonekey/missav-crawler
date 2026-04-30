@@ -160,14 +160,25 @@ func ConnectDB() *sql.DB {
 	if dsn == "" {
 		dsn = "postgres://postgres:postgres@localhost:5432/missav?sslmode=disable"
 		log.Printf("DATABASE_URL not set, using local Postgres: %s", dsn)
+	} else {
+		log.Printf("DATABASE_URL set, connecting...")
 	}
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open postgres failed: %v", err)
 	}
-	if err := db.Ping(); err != nil {
-		log.Fatalf("connect postgres failed: %v", err)
+
+	var pingErr error
+	for i := 0; i < 30; i++ {
+		if pingErr = db.Ping(); pingErr == nil {
+			break
+		}
+		log.Printf("connect postgres attempt %d/30 failed: %v", i+1, pingErr)
+		time.Sleep(2 * time.Second)
+	}
+	if pingErr != nil {
+		log.Fatalf("connect postgres failed after 30 attempts: %v", pingErr)
 	}
 
 	db.SetMaxOpenConns(25)
