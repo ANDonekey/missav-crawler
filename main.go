@@ -333,6 +333,10 @@ func detailConcurrency() int {
 	return envInt("DETAIL_CONCURRENCY", defaultDetailConcurrency)
 }
 
+func skipStreams() bool {
+	return envBool("SKIP_STREAMS", false)
+}
+
 func envInt(name string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
@@ -343,6 +347,14 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envBool(name string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func ensureVideoColumns(db *sql.DB) {
@@ -622,6 +634,12 @@ func CrawlVideoDetailPage(db *sql.DB, video Video) error {
 	}
 
 	saveVideoDetail(db, detail, video)
+	if skipStreams() {
+		updateVideoStreamStatus(db, detail.Code, "skipped")
+		log.Printf("detail saved, streams skipped: %s", detail.URL)
+		return nil
+	}
+
 	playlists := FetchM3U8Playlists(detail.URL, detail.M3U8URLs)
 	for _, playlist := range playlists {
 		saveStream(db, detail.Code, detail.URL, "hls", playlist.URL, playlist.Content)
