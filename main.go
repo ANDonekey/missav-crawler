@@ -25,6 +25,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"golang.org/x/net/proxy"
 )
 
 const startURL = "https://missav.ws/dm194/cn"
@@ -1739,13 +1740,59 @@ func crawlInterval() time.Duration {
 	return d
 }
 
+func testProxy(proxyURL string) {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		log.Printf("proxy test: invalid proxy URL: %v", err)
+		return
+	}
+
+	var dialer proxy.ContextDialer
+	switch u.Scheme {
+	case "socks5":
+		auth := &proxy.Auth{}
+		if pw, ok := u.User.Password(); ok {
+			auth.User = u.User.Username()
+			auth.Password = pw
+		} else {
+			auth = nil
+		}
+		d, err := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
+		if err != nil {
+			log.Printf("proxy test: SOCKS5 dialer failed: %v", err)
+			return
+		}
+		dialer = d.(proxy.ContextDialer)
+	default:
+		log.Printf("proxy test: unsupported scheme: %s", u.Scheme)
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: dialer.DialContext,
+		},
+	}
+
+	resp, err := client.Get("http://httpbin.org/ip")
+	if err != nil {
+		log.Printf("proxy test: request failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("proxy test: OK (HTTP %d) - exit IP: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
 func main() {
 	godotenv.Load()
 
 	initR2()
 	crawlProxy = os.Getenv("PROXY")
 	if crawlProxy != "" {
-		log.Printf("using proxy: %s", crawlProxy)
+		log.Printf("using proxy configured")
+		testProxy(crawlProxy)
 	}
 	startProfilingServer()
 
