@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ import (
 	"github.com/RomainMichau/cloudscraper_go/cloudscraper"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 const startURL = "https://missav.ws/dm194/cn"
@@ -35,9 +38,12 @@ var sharedScraper *cloudscraper.CloudScrapper
 var scraperMu sync.Mutex
 
 var (
-	startTime = time.Now()
-	statusMu  sync.Mutex
-	crawlStat = CrawlStatus{}
+	startTime  = time.Now()
+	statusMu   sync.Mutex
+	crawlStat  = CrawlStatus{}
+	r2Client   *minio.Client
+	r2Bucket   string
+	r2Endpoint string
 )
 
 type CrawlStatus struct {
@@ -49,6 +55,31 @@ type CrawlStatus struct {
 	VideosDone          int
 	CurrentJob          string
 	Errors              int
+}
+
+func initR2() {
+	endpoint := os.Getenv("R2_ENDPOINT")
+	accessKey := os.Getenv("R2_ACCESS_KEY")
+	secretKey := os.Getenv("R2_SECRET_KEY")
+	bucket := os.Getenv("R2_BUCKET")
+
+	if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" {
+		return
+	}
+
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: true,
+	})
+	if err != nil {
+		log.Printf("R2 client init failed: %v", err)
+		return
+	}
+
+	r2Client = client
+	r2Bucket = bucket
+	r2Endpoint = endpoint
+	log.Printf("R2 client initialized, bucket: %s, endpoint: %s", bucket, endpoint)
 }
 
 func startProfilingServer() {
@@ -1119,11 +1150,6 @@ func writeM3U8File(videoCode string, m3u8URL string, content string) (string, er
 		videoCode = "unknown"
 	}
 
-	dir := filepath.Join("m3u8", sanitizeFilename(videoCode))
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-
 	parsedURL, err := url.Parse(m3u8URL)
 	if err != nil {
 		return "", err
@@ -1134,6 +1160,22 @@ func writeM3U8File(videoCode string, m3u8URL string, content string) (string, er
 	}
 	if !strings.HasSuffix(strings.ToLower(filename), ".m3u8") {
 		filename += ".m3u8"
+	}
+
+	if r2Client != nil {
+		objectKey := sanitizeFilename(videoCode) + "/" + filename
+		_, err := r2Client.PutObject(context.Background(), r2Bucket, objectKey,
+			strings.NewReader(content+"\n"), int64(len(content)+1),
+			minio.PutObjectOptions{ContentType: "application/vnd.apple.mpegurl"})
+		if err != nil {
+			return "", fmt.Errorf("r2 upload failed: %w", err)
+		}
+		return r2Endpoint + "/" + r2Bucket + "/" + objectKey, nil
+	}
+
+	dir := filepath.Join("m3u8", sanitizeFilename(videoCode))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
 	}
 
 	path := filepath.Join(dir, filename)
@@ -1681,6 +1723,7 @@ func crawlInterval() time.Duration {
 func main() {
 	godotenv.Load()
 
+	initR2()
 	startProfilingServer()
 
 	db := ConnectDB()
