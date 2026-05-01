@@ -67,6 +67,12 @@ func initR2() {
 		return
 	}
 
+	// Strip any path from the endpoint (minio.New expects just scheme+host)
+	if u, err := url.Parse(endpoint); err == nil && u.Path != "" && u.Path != "/" {
+		endpoint = u.Scheme + "://" + u.Host
+		log.Printf("R2 endpoint cleaned: %s -> %s", os.Getenv("R2_ENDPOINT"), endpoint)
+	}
+
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: true,
@@ -192,7 +198,7 @@ func ConnectDB() *sql.DB {
 		dsn = "postgres://postgres:postgres@localhost:5432/missav?sslmode=disable"
 		log.Printf("DATABASE_URL not set, using local Postgres: %s", dsn)
 	} else {
-		log.Printf("DATABASE_URL set, connecting...")
+		log.Printf("DATABASE_URL set")
 	}
 
 	db, err := sql.Open("pgx", dsn)
