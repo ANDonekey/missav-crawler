@@ -67,11 +67,15 @@ func initR2() {
 		return
 	}
 
-	// Strip any path from the endpoint (minio.New expects just scheme+host)
-	if u, err := url.Parse(endpoint); err == nil && u.Path != "" && u.Path != "/" {
-		endpoint = u.Scheme + "://" + u.Host
-		log.Printf("R2 endpoint cleaned: %s -> %s", os.Getenv("R2_ENDPOINT"), endpoint)
+	// Ensure endpoint has scheme so url.Parse works correctly
+	rawEndpoint := endpoint
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "https://" + endpoint
 	}
+	if u, err := url.Parse(endpoint); err == nil {
+		endpoint = u.Host // hostname:port only, no path, no scheme
+	}
+	log.Printf("R2 endpoint cleaned: %s -> %s", rawEndpoint, endpoint)
 
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
@@ -85,7 +89,7 @@ func initR2() {
 	r2Client = client
 	r2Bucket = bucket
 	r2Endpoint = endpoint
-	log.Printf("R2 client initialized, bucket: %s, endpoint: %s", bucket, endpoint)
+	log.Printf("R2 client initialized, bucket: %s", bucket)
 }
 
 func startProfilingServer() {
