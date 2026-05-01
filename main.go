@@ -180,6 +180,15 @@ type M3U8Playlist struct {
 	Content string
 }
 
+type streamItem struct {
+	VideoCode string
+	VideoURL  string
+	M3U8URL   string
+	Content   string
+}
+
+var streamBuf chan streamItem
+
 type VideoListResult struct {
 	Videos      []Video
 	ListURLs    []string
@@ -331,10 +340,6 @@ func listConcurrency() int {
 
 func detailConcurrency() int {
 	return envInt("DETAIL_CONCURRENCY", defaultDetailConcurrency)
-}
-
-func skipStreams() bool {
-	return envBool("SKIP_STREAMS", false)
 }
 
 func envInt(name string, fallback int) int {
@@ -634,15 +639,9 @@ func CrawlVideoDetailPage(db *sql.DB, video Video) error {
 	}
 
 	saveVideoDetail(db, detail, video)
-	if skipStreams() {
-		updateVideoStreamStatus(db, detail.Code, "skipped")
-		log.Printf("detail saved, streams skipped: %s", detail.URL)
-		return nil
-	}
-
 	playlists := FetchM3U8Playlists(detail.URL, detail.M3U8URLs)
 	for _, playlist := range playlists {
-		saveStream(db, detail.Code, detail.URL, "hls", playlist.URL, playlist.Content)
+		queueStream(db, detail.Code, detail.URL, "hls", playlist.URL, playlist.Content)
 	}
 
 	if len(playlists) == 0 {
@@ -650,7 +649,7 @@ func CrawlVideoDetailPage(db *sql.DB, video Video) error {
 		log.Printf("detail saved, no m3u8 found: %s", detail.URL)
 	} else {
 		updateVideoStreamStatus(db, detail.Code, "done")
-		log.Printf("detail saved, m3u8 saved: %d %s", len(playlists), detail.URL)
+		log.Printf("detail saved, m3u8 queued: %d %s", len(playlists), detail.URL)
 	}
 
 	return nil
@@ -1368,6 +1367,84 @@ func saveStream(db *sql.DB, videoCode string, videoURL string, streamType string
 	`, videoCode, videoURL, streamType, m3u8URL, path, now, now)
 }
 
+func queueStream(db *sql.DB, videoCode string, videoURL string, streamType string, m3u8URL string, content string) {
+	m3u8URL = strings.TrimSpace(m3u8URL)
+	if m3u8URL == "" {
+		return
+	}
+	var exists int
+	err := db.QueryRow("SELECT 1 FROM streams WHERE m3u8_url = $1 LIMIT 1", m3u8URL).Scan(&exists)
+	if err == nil {
+		return
+	}
+	if err != sql.ErrNoRows {
+		log.Fatalf("query stream failed: %v", err)
+	}
+	now := time.Now().Format(time.RFC3339)
+	mustExec(db, `
+		INSERT INTO streams (
+			video_code, video_url, stream_type, m3u8_url, m3u8_path, fetched_at, created_at
+		)
+		VALUES ($1, $2, $3, $4, '', $5, $6)
+	`, videoCode, videoURL, streamType, m3u8URL, now, now)
+
+	if streamBuf != nil {
+		streamBuf <- streamItem{VideoCode: videoCode, VideoURL: videoURL, M3U8URL: m3u8URL, Content: content}
+	}
+}
+
+func initStreamUploader(db *sql.DB) {
+	if r2Client == nil {
+		return
+	}
+	streamBuf = make(chan streamItem, 10000)
+	go func() {
+		batch := make([]streamItem, 0, 100)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		flushBatch := func() {
+			if len(batch) == 0 {
+				return
+			}
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, 10)
+			for _, item := range batch {
+				wg.Add(1)
+				go func(s streamItem) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					path, err := writeM3U8File(s.VideoCode, s.M3U8URL, s.Content)
+					if err != nil {
+						log.Printf("stream upload failed: %s: %v", s.M3U8URL, err)
+						return
+					}
+					mustExec(db, `UPDATE streams SET m3u8_path = $1, updated_at = $2 WHERE m3u8_url = $3 AND video_code = $4`,
+						path, time.Now().Format(time.RFC3339), s.M3U8URL, s.VideoCode)
+				}(item)
+			}
+			wg.Wait()
+			log.Printf("batch uploaded %d streams to R2", len(batch))
+		}
+
+		for {
+			select {
+			case item := <-streamBuf:
+				batch = append(batch, item)
+				if len(batch) >= 100 {
+					flushBatch()
+					batch = batch[:0]
+				}
+			case <-ticker.C:
+				flushBatch()
+				batch = batch[:0]
+			}
+		}
+	}()
+}
+
 func updateVideoDetailStatus(db *sql.DB, code string, status string) {
 	if code == "" {
 		return
@@ -1840,6 +1917,7 @@ func main() {
 
 	db := ConnectDB()
 	defer db.Close()
+	initStreamUploader(db)
 
 	go func() {
 		for range time.NewTicker(30 * time.Second).C {
