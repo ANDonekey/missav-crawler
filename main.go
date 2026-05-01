@@ -44,6 +44,7 @@ var (
 	r2Client   *minio.Client
 	r2Bucket   string
 	r2Endpoint string
+	crawlProxy string
 )
 
 type CrawlStatus struct {
@@ -460,6 +461,7 @@ func FetchText(targetURL string, headers map[string]string, timeout int, attempt
 			Headers:   headers,
 			UserAgent: userAgent,
 			Timeout:   timeout,
+			Proxy:     crawlProxy,
 		}
 		res, err := client.Do(targetURL, options, "GET")
 		if err != nil {
@@ -1734,6 +1736,10 @@ func main() {
 	godotenv.Load()
 
 	initR2()
+	crawlProxy = os.Getenv("PROXY")
+	if crawlProxy != "" {
+		log.Printf("using proxy: %s", crawlProxy)
+	}
 	startProfilingServer()
 
 	db := ConnectDB()
