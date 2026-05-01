@@ -1501,7 +1501,7 @@ func enqueueJob(db *sql.DB, jobType string, targetURL string, videoCode string, 
 			job_type, url, video_code, status, priority, retry_count, max_retries,
 			scheduled_at, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, 'pending', $4, 0, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, 'pending', $4, 0, $5, $6, $7, $8) ON CONFLICT (job_type, url) DO NOTHING
 	`, jobType, targetURL, videoCode, priority, defaultMaxRetries, scheduledAt, now, now)
 }
 
