@@ -1272,6 +1272,7 @@ func saveVideo(db *sql.DB, video Video) bool {
 			)
 		VALUES
 			($1, $2, $3, $4, $5, 'pending', 'pending', $6, $7, $8, $9)
+		ON CONFLICT (code) DO NOTHING
 	`, video.Code, video.URL, video.Title, video.Duration, video.Section, now, now, now, now)
 
 	log.Printf("video saved: [%s] %s %s", video.Section, video.Duration, video.Title)
@@ -1338,6 +1339,7 @@ func saveVideoDetail(db *sql.DB, detail VideoDetail, listVideo Video) {
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			'done', 'pending', $15, $16, $17, $18, $19)
+		ON CONFLICT (code) DO NOTHING
 	`, detail.Code, detail.URL, detail.Title, duration, section, detail.Description,
 		detail.CoverURL, detail.ReleaseDate, detail.DurationSeconds, detail.Actors,
 		detail.Genres, detail.Maker, detail.Director, detail.Tags, now, now, now, now, now)
@@ -1365,6 +1367,7 @@ func saveStream(db *sql.DB, videoCode string, videoURL string, streamType string
 			video_code, video_url, stream_type, m3u8_url, m3u8_path, fetched_at, created_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (m3u8_url) DO NOTHING
 	`, videoCode, videoURL, streamType, m3u8URL, path, now, now)
 }
 
@@ -1387,6 +1390,7 @@ func queueStream(db *sql.DB, videoCode string, videoURL string, streamType strin
 			video_code, video_url, stream_type, m3u8_url, m3u8_path, fetched_at, created_at
 		)
 		VALUES ($1, $2, $3, $4, '', $5, $6)
+		ON CONFLICT (m3u8_url) DO NOTHING
 	`, videoCode, videoURL, streamType, m3u8URL, now, now)
 
 	if streamBuf != nil {
