@@ -1102,6 +1102,7 @@ func FetchM3U8Playlists(referer string, urls []string) []M3U8Playlist {
 			for _, nestedURL := range extractNestedM3U8URLs(m3u8URL, content) {
 				enqueue(nestedURL)
 			}
+
 		}()
 	}
 
@@ -1421,7 +1422,7 @@ func initStreamUploader(db *sql.DB) {
 						log.Printf("stream upload failed: %s: %v", s.M3U8URL, err)
 						return
 					}
-					mustExec(db, `UPDATE streams SET m3u8_path = $1, updated_at = $2 WHERE m3u8_url = $3 AND video_code = $4`,
+					mustExec(db, `UPDATE streams SET m3u8_path = $1 WHERE m3u8_url = $2 AND video_code = $3`,
 						path, time.Now().Format(time.RFC3339), s.M3U8URL, s.VideoCode)
 				}(item)
 			}
