@@ -34,9 +34,8 @@ const defaultDetailLimit = 10
 const defaultJobLimit = 100
 const defaultMaxRetries = 3
 const maxM3U8Concurrency = 6
-
-var sharedScraper *cloudscraper.CloudScrapper
-var scraperMu sync.Mutex
+const defaultListConcurrency = 3
+const defaultDetailConcurrency = 5
 
 var (
 	startTime  = time.Now()
@@ -326,6 +325,14 @@ func jobLimit() int {
 	return envInt("JOB_LIMIT", defaultJobLimit)
 }
 
+func listConcurrency() int {
+	return envInt("LIST_CONCURRENCY", defaultListConcurrency)
+}
+
+func detailConcurrency() int {
+	return envInt("DETAIL_CONCURRENCY", defaultDetailConcurrency)
+}
+
 func envInt(name string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
@@ -493,27 +500,10 @@ func FetchText(targetURL string, headers map[string]string, timeout int, attempt
 }
 
 func GetScraper() (*cloudscraper.CloudScrapper, error) {
-	scraperMu.Lock()
-	defer scraperMu.Unlock()
-
-	if sharedScraper != nil {
-		return sharedScraper, nil
-	}
-
-	client, err := cloudscraper.Init(false, false)
-	if err != nil {
-		return nil, err
-	}
-	sharedScraper = client
-	return sharedScraper, nil
+	return cloudscraper.Init(false, false)
 }
 
-func ResetScraper() {
-	scraperMu.Lock()
-	defer scraperMu.Unlock()
-
-	sharedScraper = nil
-}
+func ResetScraper() {}
 
 func CrawlVideoListPage(db *sql.DB, targetURL string) (VideoListResult, error) {
 	body, err := FetchHTML(targetURL, startURL)
@@ -1502,119 +1492,152 @@ func loadVideoByCode(db *sql.DB, code string) (Video, bool) {
 }
 
 func runVideoListJobs(db *sql.DB, limit int) int {
-	processed := 0
 	unlimited := limit <= 0
-	batchSize := 10
+	batchSize := 30
+	var mu sync.Mutex
+	proc := 0
+
 	for {
-		if !unlimited && processed >= limit {
+		mu.Lock()
+		currentProc := proc
+		mu.Unlock()
+
+		if !unlimited && currentProc >= limit {
 			break
 		}
 		n := batchSize
-		if !unlimited && limit-processed < n {
-			n = limit - processed
+		if !unlimited && limit-currentProc < n {
+			n = limit - currentProc
 		}
 		jobs := loadPendingJobs(db, "list", n)
 		if len(jobs) == 0 {
 			break
 		}
 
+		conc := listConcurrency()
+		sem := make(chan struct{}, conc)
+		var wg sync.WaitGroup
+
 		for _, job := range jobs {
-			if !unlimited && processed >= limit {
-				break
-			}
+			wg.Add(1)
+			go func(j CrawlJob) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-			markJobRunning(db, job)
-			result, err := CrawlVideoListPage(db, job.URL)
-			processed++
-				statusMu.Lock()
-				crawlStat.ListJobsProcessed = processed
-				crawlStat.CurrentJob = job.URL
-				statusMu.Unlock()
-			if err != nil {
-				markJobFailed(db, job, err)
-				statusMu.Lock()
-				crawlStat.Errors++
-				statusMu.Unlock()
-				log.Printf("video list job failed: %s: %v", job.URL, err)
-				continue
-			}
+				markJobRunning(db, j)
+				result, err := CrawlVideoListPage(db, j.URL)
 
-			for _, listURL := range result.ListURLs {
-				enqueueJob(db, "list", listURL, "", 20, false)
-			}
-			if result.NextPageURL != "" {
-				enqueueJob(db, "list", result.NextPageURL, "", 20, false)
-			}
-			for _, video := range result.Videos {
-				enqueueJob(db, "detail", video.URL, video.Code, 10, false)
-			}
-			markJobDone(db, job)
-			log.Printf(
-				"video list job done: %s, list jobs discovered: %d, video detail jobs queued: %d",
-				job.URL,
-				len(result.ListURLs),
-				len(result.Videos),
-			)
+				mu.Lock()
+				proc++
+				crawlStat.ListJobsProcessed = proc
+				crawlStat.CurrentJob = j.URL
+				mu.Unlock()
+
+				if err != nil {
+					markJobFailed(db, j, err)
+					statusMu.Lock()
+					crawlStat.Errors++
+					statusMu.Unlock()
+					log.Printf("video list job failed: %s: %v", j.URL, err)
+					return
+				}
+
+				for _, listURL := range result.ListURLs {
+					enqueueJob(db, "list", listURL, "", 20, false)
+				}
+				if result.NextPageURL != "" {
+					enqueueJob(db, "list", result.NextPageURL, "", 20, false)
+				}
+				for _, video := range result.Videos {
+					enqueueJob(db, "detail", video.URL, video.Code, 10, false)
+				}
+				markJobDone(db, j)
+				log.Printf(
+					"video list job done: %s, list jobs discovered: %d, video detail jobs queued: %d",
+					j.URL,
+					len(result.ListURLs),
+					len(result.Videos),
+				)
+			}(job)
 		}
+		wg.Wait()
 	}
-	log.Printf("video list jobs processed: %d", processed)
-	return processed
+	log.Printf("video list jobs processed: %d", proc)
+	return proc
 }
 
 func runVideoDetailJobs(db *sql.DB, limit int) {
 	unlimited := limit <= 0
 	batchSize := 50
-	processed := 0
+	var mu sync.Mutex
+	proc := 0
+
 	for {
-		if !unlimited && processed >= limit {
+		mu.Lock()
+		currentProc := proc
+		mu.Unlock()
+
+		if !unlimited && currentProc >= limit {
 			break
 		}
 		n := batchSize
-		if !unlimited && limit-processed < n {
-			n = limit - processed
+		if !unlimited && limit-currentProc < n {
+			n = limit - currentProc
 		}
 		jobs := loadPendingJobs(db, "detail", n)
 		if len(jobs) == 0 {
 			break
 		}
 
+		conc := detailConcurrency()
+		sem := make(chan struct{}, conc)
+		var wg sync.WaitGroup
+
 		for _, job := range jobs {
-			if !unlimited && processed >= limit {
-				statusMu.Lock()
-				crawlStat.DetailJobsProcessed = processed
-				crawlStat.CurrentJob = job.URL
-				statusMu.Unlock()
-				break
-			}
-			processed++
+			wg.Add(1)
+			go func(j CrawlJob) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-			video, ok := loadVideoByCode(db, job.VideoCode)
-			if !ok {
-				video = Video{
-					Code: job.VideoCode,
-					URL:  job.URL,
+				video, ok := loadVideoByCode(db, j.VideoCode)
+				if !ok {
+					video = Video{
+						Code: j.VideoCode,
+						URL:  j.URL,
+					}
 				}
-			}
-			if video.URL == "" {
-				video.URL = job.URL
-			}
+				if video.URL == "" {
+					video.URL = j.URL
+				}
 
-			markJobRunning(db, job)
-			if err := CrawlVideoDetailPage(db, video); err != nil {
-				statusMu.Lock()
-				crawlStat.Errors++
-				statusMu.Unlock()
-				updateVideoDetailStatus(db, video.Code, "failed")
-				updateVideoStreamStatus(db, video.Code, "failed")
-				markJobFailed(db, job, err)
-				log.Printf("video detail job failed: %s: %v", job.URL, err)
-				continue
-			}
+				markJobRunning(db, j)
+				err := CrawlVideoDetailPage(db, video)
 
-			markJobDone(db, job)
+				mu.Lock()
+				proc++
+				crawlStat.DetailJobsProcessed = proc
+				crawlStat.CurrentJob = j.URL
+				mu.Unlock()
+
+				if err != nil {
+					statusMu.Lock()
+					crawlStat.Errors++
+					statusMu.Unlock()
+					updateVideoDetailStatus(db, video.Code, "failed")
+					updateVideoStreamStatus(db, video.Code, "failed")
+					markJobFailed(db, j, err)
+					log.Printf("video detail job failed: %s: %v", j.URL, err)
+					return
+				}
+
+				markJobDone(db, j)
+			}(job)
 		}
+		wg.Wait()
 	}
-	log.Printf("video detail jobs processed: %d", processed)
+	log.Printf("video detail jobs processed: %d", proc)
 }
 
 func RunCrawlerJobs(db *sql.DB) {
@@ -1747,8 +1770,14 @@ func testProxy(proxyURL string) {
 		return
 	}
 
-	var dialer proxy.ContextDialer
+	client := &http.Client{Timeout: 10 * time.Second}
+
 	switch u.Scheme {
+	case "http":
+		proxyURLParsed, _ := url.Parse(proxyURL)
+		client.Transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURLParsed),
+		}
 	case "socks5":
 		auth := &proxy.Auth{}
 		if pw, ok := u.User.Password(); ok {
@@ -1762,17 +1791,12 @@ func testProxy(proxyURL string) {
 			log.Printf("proxy test: SOCKS5 dialer failed: %v", err)
 			return
 		}
-		dialer = d.(proxy.ContextDialer)
+		client.Transport = &http.Transport{
+			DialContext: d.(proxy.ContextDialer).DialContext,
+		}
 	default:
 		log.Printf("proxy test: unsupported scheme: %s", u.Scheme)
 		return
-	}
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
-		},
 	}
 
 	resp, err := client.Get("http://httpbin.org/ip")
