@@ -1423,7 +1423,7 @@ func initStreamUploader(db *sql.DB) {
 						return
 					}
 					mustExec(db, `UPDATE streams SET m3u8_path = $1 WHERE m3u8_url = $2 AND video_code = $3`,
-						path, time.Now().Format(time.RFC3339), s.M3U8URL, s.VideoCode)
+						path, s.M3U8URL, s.VideoCode)
 				}(item)
 			}
 			wg.Wait()
