@@ -27,7 +27,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-const startURL = "https://missav.ws/dm194/cn"
+const startURL = "https://missav.cm/dm194/cn"
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
 const defaultDetailLimit = 10
 const defaultJobLimit = 100
@@ -782,7 +782,7 @@ func isVideoURL(rawURL string) bool {
 		return false
 	}
 
-	if u.Host != "missav.ws" {
+	if u.Host != "missav.cm" {
 		return false
 	}
 
@@ -846,7 +846,7 @@ func isListURL(rawURL string) bool {
 			}
 		}
 	}
-	if err != nil || u.Host != "missav.ws" {
+	if err != nil || u.Host != "missav.cm" {
 		return false
 	}
 
@@ -1684,25 +1684,25 @@ func seedIncrementalJobs(db *sql.DB) {
 func initialSeedURLs() []string {
 	return []string{
 		startURL,
-		"https://missav.ws/cn/new",
-		"https://missav.ws/cn/release",
-		"https://missav.ws/cn/chinese-subtitle",
-		"https://missav.ws/cn/uncensored-leak",
-		"https://missav.ws/cn/today-hot",
-		"https://missav.ws/cn/weekly-hot",
-		"https://missav.ws/cn/monthly-hot",
-		"https://missav.ws/cn/genres",
-		"https://missav.ws/cn/makers",
-		"https://missav.ws/cn/actresses",
+		"https://missav.cm/cn/new",
+		"https://missav.cm/cn/release",
+		"https://missav.cm/cn/chinese-subtitle",
+		"https://missav.cm/cn/uncensored-leak",
+		"https://missav.cm/cn/today-hot",
+		"https://missav.cm/cn/weekly-hot",
+		"https://missav.cm/cn/monthly-hot",
+		"https://missav.cm/cn/genres",
+		"https://missav.cm/cn/makers",
+		"https://missav.cm/cn/actresses",
 	}
 }
 
 func incrementalSeedURLs() []string {
 	return []string{
 		startURL,
-		"https://missav.ws/cn/new",
-		"https://missav.ws/cn/release",
-		"https://missav.ws/cn/chinese-subtitle",
+		"https://missav.cm/cn/new",
+		"https://missav.cm/cn/release",
+		"https://missav.cm/cn/chinese-subtitle",
 	}
 }
 
